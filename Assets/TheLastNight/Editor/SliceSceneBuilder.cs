@@ -22,6 +22,8 @@ namespace TheLastNight.EditorTools
         const string GenDir = Root + "/Generated";
         public const string ScenePath = Root + "/Scenes/Andhvan_Slice.unity";
 
+        static Material mHalo, mWindowGlow;
+        static Texture2D torchCookie;
         static Material mDirt, mLane, mPlaster, mPlasterDark, mWood, mDoor, mRoof, mStone, mMetal, mFoliage, mTrunk, mCloth, mMonster, mEye, mGhost, mBulb, mFuse, mBattery, mMedkit, mPaper, mCar, mGlass, mRain, mWater;
         static Transform level;
         static readonly List<Collider> bakeDisabled = new List<Collider>();
@@ -126,6 +128,9 @@ namespace TheLastNight.EditorTools
             mMedkit = Emissive("Medkit", new Color(0.9f, 0.9f, 0.9f), new Color(0.6f, 0.05f, 0.05f));
             mPaper = Emissive("Paper", new Color(0.85f, 0.8f, 0.65f), new Color(0.25f, 0.23f, 0.18f));
             mRain = RainMaterial();
+            mHalo = HaloMaterial();
+            mWindowGlow = Emissive("WindowGlow", new Color(0.2f, 0.1f, 0.03f), new Color(1f, 0.45f, 0.12f) * 1.6f);
+            torchCookie = MakeCookie();
         }
 
         static Material Lit(string name, Color c, Texture2D tex, float smooth, Vector2 tiling, float metallic = 0f)
@@ -162,6 +167,63 @@ namespace TheLastNight.EditorTools
             m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             m.renderQueue = (int)RenderQueue.Transparent;
             return SaveMat("Rain", m);
+        }
+
+        static Material HaloMaterial()
+        {
+            var glow = SaveTexture("halo", HaloTex(128));
+            var m = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
+            m.SetTexture("_BaseMap", glow);
+            m.SetColor("_BaseColor", new Color(1f, 0.72f, 0.42f, 0.55f));
+            m.SetFloat("_Surface", 1f);
+            m.SetFloat("_Blend", 0f);
+            m.SetOverrideTag("RenderType", "Transparent");
+            m.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+            m.SetFloat("_DstBlend", (float)BlendMode.One);   // additive-looking glow
+            m.SetFloat("_ZWrite", 0f);
+            m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            m.renderQueue = (int)RenderQueue.Transparent;
+            return SaveMat("Halo", m);
+        }
+
+        static Texture2D HaloTex(int s)
+        {
+            var t = new Texture2D(s, s);
+            for (int y = 0; y < s; y++) for (int x = 0; x < s; x++)
+            {
+                float d = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(s / 2f, s / 2f)) / (s / 2f);
+                float a = Mathf.Pow(Mathf.Clamp01(1f - d), 2.2f);
+                t.SetPixel(x, y, new Color(1, 1, 1, a));
+            }
+            t.Apply();
+            return t;
+        }
+
+        /// <summary>Flashlight cookie: hot centre, dark ring, soft outer spill, faint lens smudges.</summary>
+        static Texture2D MakeCookie()
+        {
+            const int s = 256;
+            var t = new Texture2D(s, s, TextureFormat.RGBA32, false);
+            for (int y = 0; y < s; y++) for (int x = 0; x < s; x++)
+            {
+                float d = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(s / 2f, s / 2f)) / (s / 2f);
+                float hot = Mathf.Exp(-d * d * 9f);
+                float ring = Mathf.Exp(-Mathf.Pow((d - 0.45f) * 9f, 2f)) * 0.35f;
+                float spill = Mathf.Clamp01(1f - d) * 0.45f;
+                float smudge = 0.85f + 0.15f * Mathf.PerlinNoise(x * 0.05f, y * 0.05f);
+                float v = Mathf.Clamp01((hot * 0.75f + ring + spill) * smudge) * (d < 0.98f ? 1f : 0f);
+                t.SetPixel(x, y, new Color(v, v, v, v));
+            }
+            t.Apply();
+            string path = GenDir + "/T_TorchCookie.png";
+            File.WriteAllBytes(path, t.EncodeToPNG());
+            AssetDatabase.ImportAsset(path);
+            var imp = (TextureImporter)AssetImporter.GetAtPath(path);
+            imp.textureType = TextureImporterType.Cookie;
+            imp.wrapMode = TextureWrapMode.Clamp;
+            imp.alphaSource = TextureImporterAlphaSource.FromGrayScale;
+            imp.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
         static Material SaveMat(string name, Material m)
@@ -236,8 +298,10 @@ namespace TheLastNight.EditorTools
         static void SetupLighting()
         {
             RenderSettings.skybox = null;
-            RenderSettings.ambientMode = AmbientMode.Flat;
-            RenderSettings.ambientLight = new Color(0.045f, 0.05f, 0.075f);
+            RenderSettings.ambientMode = AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = new Color(0.07f, 0.085f, 0.14f);
+            RenderSettings.ambientEquatorColor = new Color(0.035f, 0.04f, 0.06f);
+            RenderSettings.ambientGroundColor = new Color(0.012f, 0.01f, 0.01f);
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
             RenderSettings.fogColor = new Color(0.02f, 0.024f, 0.032f);
@@ -246,7 +310,7 @@ namespace TheLastNight.EditorTools
             var moon = new GameObject("Moon").AddComponent<Light>();
             moon.type = LightType.Directional;
             moon.color = new Color(0.45f, 0.55f, 0.85f);
-            moon.intensity = 0.18f;
+            moon.intensity = 0.28f;
             moon.shadows = LightShadows.Soft;
             moon.transform.rotation = Quaternion.Euler(38f, -35f, 0f);
             moon.gameObject.AddComponent<ShadowQualitySwitch>().minimumPreset = GraphicsPreset.High;
@@ -343,7 +407,16 @@ namespace TheLastNight.EditorTools
             Box("FrontR", h, L(h, w / 2 - side / 2, ht / 2, d / 2), new Vector3(side, ht, t), wall, rot: h.rotation);
             Box("FrontTop", h, L(h, 0, doorH + (ht - doorH) / 2, d / 2), new Vector3(doorW, ht - doorH, t), wall, rot: h.rotation);
             // dark window holes (decor)
-            Box("Window", h, L(h, -w / 4 - 0.4f, 1.7f, d / 2 + 0.13f), new Vector3(0.9f, 0.8f, 0.02f), mGlass, collider: false, rot: h.rotation);
+            // locked houses sometimes have a faint light inside... someone is home
+            bool glow = !enterable && name.EndsWith("2");
+            Box("Window", h, L(h, -w / 4 - 0.4f, 1.7f, d / 2 + 0.13f), new Vector3(0.9f, 0.8f, 0.02f), glow ? mWindowGlow : mGlass, collider: false, rot: h.rotation);
+            if (glow)
+            {
+                var wl = new GameObject("WindowLight").AddComponent<Light>(); wl.transform.SetParent(h);
+                wl.transform.position = L(h, -w / 4 - 0.4f, 1.7f, d / 2 + 0.9f);
+                wl.type = LightType.Point; wl.color = new Color(1f, 0.5f, 0.15f); wl.range = 4f; wl.intensity = 0.9f;
+                var wf = wl.gameObject.AddComponent<FlickerLight>(); wf.baseIntensity = 0.9f; wf.idleFlicker = 0.3f;
+            }
             // roof
             var roofA = Box("RoofA", h, L(h, 0, ht + 0.7f, -d / 4), new Vector3(w + 0.8f, 0.15f, d / 2 + 0.9f), mRoof, rot: h.rotation * Quaternion.Euler(-25, 0, 0));
             Box("RoofB", h, L(h, 0, ht + 0.7f, d / 4), new Vector3(w + 0.8f, 0.15f, d / 2 + 0.9f), mRoof, rot: h.rotation * Quaternion.Euler(25, 0, 0));
@@ -553,6 +626,13 @@ namespace TheLastNight.EditorTools
             l.type = LightType.Point; l.color = new Color(1f, 0.72f, 0.45f); l.range = 11f; l.intensity = intensity; l.shadows = LightShadows.None;
             var fl = l.gameObject.AddComponent<FlickerLight>(); fl.baseIntensity = intensity; fl.idleFlicker = powered ? 0.12f : 0.02f; fl.Powered = powered;
             fl.bulb = bulbGo.GetComponent<Renderer>();
+            var halo = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            halo.name = "Halo"; halo.transform.SetParent(t); halo.transform.position = bulbGo.transform.position;
+            halo.transform.localScale = Vector3.one * 2.6f;
+            Object.DestroyImmediate(halo.GetComponent<Collider>());
+            halo.GetComponent<Renderer>().sharedMaterial = mHalo;
+            halo.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            var bb = halo.AddComponent<Billboard>(); bb.followIntensity = fl;
             if (!powered) l.enabled = false;
             return l;
         }
@@ -725,6 +805,7 @@ namespace TheLastNight.EditorTools
             var spot = new GameObject("Beam").AddComponent<Light>(); spot.transform.SetParent(fl.transform, false); spot.transform.localPosition = new Vector3(0, 0, 0.12f);
             spot.type = LightType.Spot; spot.range = 24f; spot.spotAngle = 58f; spot.innerSpotAngle = 25f; spot.intensity = 6f; spot.color = new Color(1f, 0.95f, 0.85f);
             spot.shadows = LightShadows.Soft;
+            spot.cookie = torchCookie;
             var flash = fl.AddComponent<Flashlight>(); flash.spot = spot; flash.lensRenderer = lens.GetComponent<Renderer>();
 
             var pc = go.AddComponent<PlayerController>(); pc.head = head; pc.cam = cam;
@@ -837,7 +918,7 @@ namespace TheLastNight.EditorTools
             var ld = profile.Add<LensDistortion>(true); ld.intensity.Override(0f);
             var adj = profile.Add<ColorAdjustments>(true); adj.saturation.Override(-25f); adj.contrast.Override(18f); adj.colorFilter.Override(new Color(0.85f, 0.95f, 1f)); adj.postExposure.Override(0.3f);
             var tm = profile.Add<Tonemapping>(true); tm.mode.Override(TonemappingMode.ACES);
-            var bl = profile.Add<Bloom>(true); bl.intensity.Override(0.6f); bl.threshold.Override(1f);
+            var bl = profile.Add<Bloom>(true); bl.intensity.Override(0.9f); bl.threshold.Override(1f);
             foreach (var comp in profile.components) AssetDatabase.AddObjectToAsset(comp, profile);
             EditorUtility.SetDirty(profile);
             AssetDatabase.SaveAssets();

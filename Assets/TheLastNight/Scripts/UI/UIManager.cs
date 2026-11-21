@@ -1,6 +1,7 @@
-// UIManager: builds the whole dark-horror UI at runtime with uGUI (no prefabs to wire):
-// Main Menu, Settings (graphics/audio/controls), Loading, mobile HUD, Inventory, Note reader,
-// Pause, Game Over and Ending screens. Every button here does real work.
+// UIManager: the complete horror-styled UI, built at runtime with uGUI (no prefabs to wire).
+// Main menu, Settings, Loading, mobile HUD, Inventory, Note reader, Pause, Game Over, Ending.
+// Visual language: bone-white text on deep black, blood-red accents, typewriter body text,
+// thin rings + clean icons for touch controls, context-sensitive Interact button.
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -14,39 +15,39 @@ namespace TheLastNight
 {
     public class UIManager : MonoBehaviour
     {
-        static readonly Color Blood = new Color(0.62f, 0.04f, 0.03f);
-        static readonly Color Bone = new Color(0.86f, 0.82f, 0.75f);
-        static readonly Color Dim = new Color(0.55f, 0.5f, 0.45f);
-        static readonly Color PanelBg = new Color(0f, 0f, 0f, 0.82f);
+        public static readonly Color Blood = new Color(0.72f, 0.05f, 0.04f);
+        public static readonly Color Bone = new Color(0.9f, 0.86f, 0.78f);
+        public static readonly Color Dim = new Color(0.58f, 0.53f, 0.47f);
+        public static readonly Color Ember = new Color(1f, 0.62f, 0.25f);
+        static readonly Color Ink = new Color(0.02f, 0.015f, 0.015f, 0.92f);
 
-        Font font;
-        Sprite circle, rounded, white;
-        Canvas canvas;
+        Font titleFont, bodyFont, hudFont;
         RectTransform root;
         GameObject mainMenu, settings, loading, hud, pause, inventoryPanel, notePanel, gameOver, escaped;
         GameObject settingsReturnTo;
-        Text objectiveText, messageText, promptText, loadingText, invText, noteTitle, noteBody, gameOverStats, escapedStats, fuseText;
-        Image holdRing, batteryFill, staminaFill, healthFill, damageFlash, loadingFill;
-        HoldButton btnInteract, btnSprint, btnCrouch, btnFlash;
-        CanvasGroup hudGroup;
+        Text titleText, objectiveText, messageText, promptText, loadingTip, invText, noteTitle, noteBody, gameOverStats, escapedStats, bagBadge;
+        CanvasGroup messageGroup, promptGroup, interactGroup, staminaGroup, hudGroup;
+        Image loadingFill, healthFill, staminaFill, damageVignette, fearVignette, crosshair;
+        Image[] batteryCells = new Image[4];
+        HoldButton btnInteract, btnSprint, btnCrouch, btnTorch;
         RectTransform hudButtons;
-        float messageUntil;
+        float messageUntil, objectiveFlash;
         bool damageHooked;
         GameManager gm;
 
         // ============================================================ setup
         void Awake()
         {
-            font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            circle = MakeCircleSprite(128, 0.9f);
-            rounded = MakeRoundedSprite(64, 14);
-            white = MakeRoundedSprite(8, 0);
+            Font legacy = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            titleFont = Resources.Load<Font>("Fonts/Creepster-Regular") ?? legacy;
+            bodyFont = Resources.Load<Font>("Fonts/SpecialElite-Regular") ?? legacy;
+            hudFont = Resources.Load<Font>("Fonts/Oswald") ?? legacy;
             EnsureEventSystem();
             BuildCanvas();
+            BuildHud();              // HUD first so overlays draw above it
             BuildMainMenu();
             BuildSettings();
             BuildLoading();
-            BuildHud();
             BuildInventory();
             BuildNote();
             BuildPause();
@@ -59,7 +60,7 @@ namespace TheLastNight
             gm = GameManager.Instance;
             if (gm == null) { Debug.LogError("[TLN] UIManager needs a GameManager in the scene."); return; }
             gm.StateChanged += OnState;
-            gm.ObjectiveChanged += t => objectiveText.text = t;
+            gm.ObjectiveChanged += t => { objectiveText.text = t.ToUpperInvariant(); objectiveFlash = 1f; };
             gm.Message += (t, s) => { messageText.text = t; messageUntil = Time.unscaledTime + s; };
             gm.NoteOpened += (t, b) => { noteTitle.text = t; noteBody.text = b; notePanel.SetActive(true); };
             GameSettings.Changed += ApplyHudSettings;
@@ -84,7 +85,7 @@ namespace TheLastNight
         {
             var go = new GameObject("UI", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             go.transform.SetParent(transform, false);
-            canvas = go.GetComponent<Canvas>();
+            var canvas = go.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = 10;
             var scaler = go.GetComponent<CanvasScaler>();
@@ -94,215 +95,286 @@ namespace TheLastNight
             root = (RectTransform)go.transform;
         }
 
-        // ============================================================ screens
+        // ============================================================ main menu
         void BuildMainMenu()
         {
-            mainMenu = Panel("MainMenu", new Color(0f, 0f, 0f, 0.55f));
-            var t = Label(mainMenu.transform, "THE LAST NIGHT", 120, Blood, TextAnchor.MiddleCenter);
-            Place(t.rectTransform, new Vector2(0.5f, 0.78f), new Vector2(1400, 160));
-            t.fontStyle = FontStyle.Bold;
-            var s = Label(mainMenu.transform, "ANDHVAN  •  KARTIK AMAVASYA  •  2006 KE 37 LOG", 30, Dim, TextAnchor.MiddleCenter);
-            Place(s.rectTransform, new Vector2(0.5f, 0.68f), new Vector2(1400, 50));
-            var col = Column(mainMenu.transform, new Vector2(0.5f, 0.38f), 520, 22);
-            MenuButton(col, "KHELO (SOLO)", () => gm.StartGame(), true);
-            MenuButton(col, "SETTINGS", () => OpenSettings(mainMenu), false);
-            MenuButton(col, "BAHAR NIKLO (QUIT)", () => Application.Quit(), false);
-            var v = Label(mainMenu.transform, "Phase 1 vertical slice  -  Headphones lagao", 24, Dim, TextAnchor.LowerCenter);
-            Place(v.rectTransform, new Vector2(0.5f, 0.06f), new Vector2(1200, 40));
+            mainMenu = Layer("MainMenu");
+            var shade = Img(mainMenu.transform, UISprites.SideShade, new Color(0, 0, 0, 0.92f));
+            Anchor(shade.rectTransform, new Vector2(0, 0), new Vector2(0.62f, 1));
+            var bottom = Img(mainMenu.transform, UISprites.VerticalShade, new Color(0, 0, 0, 0.7f));
+            Anchor(bottom.rectTransform, new Vector2(0, 0), new Vector2(1, 0.35f));
+
+            titleText = Label(mainMenu.transform, "THE LAST NIGHT", titleFont, 150, Blood, TextAnchor.LowerLeft);
+            Pin(titleText.rectTransform, new Vector2(0, 1), new Vector2(120, -120), new Vector2(1300, 200));
+            AddShadow(titleText, new Color(0, 0, 0, 0.9f), 6);
+            var tag = Label(mainMenu.transform, "Andhvan, 2006.  37 log ek hi raat mein gayab ho gaye.", bodyFont, 34, Dim, TextAnchor.UpperLeft);
+            Pin(tag.rectTransform, new Vector2(0, 1), new Vector2(128, -330), new Vector2(1300, 60));
+            var line = Img(mainMenu.transform, UISprites.Square, new Color(Blood.r, Blood.g, Blood.b, 0.8f));
+            Pin(line.rectTransform, new Vector2(0, 1), new Vector2(128, -395), new Vector2(120, 4));
+
+            var col = Column(mainMenu.transform, new Vector2(0, 1), new Vector2(120, -440), 560, 6, TextAnchor.UpperLeft);
+            TextButton(col, "KHELO", () => gm.StartGame(), 64);
+            TextButton(col, "SETTINGS", () => OpenSettings(mainMenu), 64);
+            TextButton(col, "BAHAR NIKLO", () => Application.Quit(), 64);
+
+            var hint = Label(mainMenu.transform, "Headphones lagao.  Batti band karo.", bodyFont, 26, new Color(Dim.r, Dim.g, Dim.b, 0.8f), TextAnchor.LowerLeft);
+            Pin(hint.rectTransform, new Vector2(0, 0), new Vector2(128, 70), new Vector2(1000, 40));
+            var ver = Label(mainMenu.transform, "CHAPTER 1  ·  PEHLI RAAT", hudFont, 24, new Color(Dim.r, Dim.g, Dim.b, 0.6f), TextAnchor.LowerRight);
+            Pin(ver.rectTransform, new Vector2(1, 0), new Vector2(-80, 70), new Vector2(600, 40), new Vector2(1, 0));
         }
 
+        // ============================================================ settings
         void BuildSettings()
         {
-            settings = Panel("Settings", PanelBg);
-            var title = Label(settings.transform, "SETTINGS", 64, Bone, TextAnchor.MiddleCenter);
-            Place(title.rectTransform, new Vector2(0.5f, 0.9f), new Vector2(800, 90));
+            settings = Layer("Settings");
+            Img(settings.transform, UISprites.Square, Ink).rectTransform.Stretch();
+            var title = Label(settings.transform, "SETTINGS", hudFont, 72, Bone, TextAnchor.UpperLeft);
+            Pin(title.rectTransform, new Vector2(0, 1), new Vector2(120, -70), new Vector2(800, 100));
+            var line = Img(settings.transform, UISprites.Square, Blood);
+            Pin(line.rectTransform, new Vector2(0, 1), new Vector2(124, -175), new Vector2(90, 4));
 
-            var left = Column(settings.transform, new Vector2(0.29f, 0.5f), 760, 14);
+            var left = Column(settings.transform, new Vector2(0, 1), new Vector2(120, -220), 760, 10, TextAnchor.UpperLeft);
             Header(left, "GRAPHICS");
-            Cycler(left, "Quality", new[] { "Low", "Medium", "High" }, () => (int)GameSettings.Preset, i => GameSettings.Preset = (GraphicsPreset)i);
-            Cycler(left, "FPS", new[] { "30", "45", "60" }, () => GameSettings.TargetFps == 60 ? 2 : GameSettings.TargetFps == 45 ? 1 : 0, i => GameSettings.TargetFps = i == 2 ? 60 : i == 1 ? 45 : 30);
+            Cycler(left, "Quality", new[] { "LOW", "MEDIUM", "HIGH" }, () => (int)GameSettings.Preset, i => GameSettings.Preset = (GraphicsPreset)i);
+            Cycler(left, "Frame rate", new[] { "30 FPS", "45 FPS", "60 FPS" }, () => GameSettings.TargetFps == 60 ? 2 : GameSettings.TargetFps == 45 ? 1 : 0, i => GameSettings.TargetFps = i == 2 ? 60 : i == 1 ? 45 : 30);
             SliderRow(left, "Resolution", 0.5f, 1f, () => GameSettings.ResolutionScale, v => GameSettings.ResolutionScale = v);
             Header(left, "AUDIO");
             SliderRow(left, "Master", 0f, 1f, () => GameSettings.MasterVolume, v => { GameSettings.MasterVolume = v; AudioListener.volume = v; });
             SliderRow(left, "Music", 0f, 1f, () => GameSettings.MusicVolume, v => GameSettings.MusicVolume = v);
 
-            var right = Column(settings.transform, new Vector2(0.71f, 0.5f), 760, 14);
+            var right = Column(settings.transform, new Vector2(0, 1), new Vector2(1000, -220), 760, 10, TextAnchor.UpperLeft);
             Header(right, "CONTROLS");
             SliderRow(right, "Look speed", 0.2f, 3f, () => GameSettings.LookSensitivity, v => GameSettings.LookSensitivity = v);
             ToggleRow(right, "Invert Y", () => GameSettings.InvertY, b => GameSettings.InvertY = b);
-            ToggleRow(right, "Sprint = toggle", () => GameSettings.SprintToggle, b => GameSettings.SprintToggle = b);
-            SliderRow(right, "HUD size", 0.7f, 1.4f, () => GameSettings.HudScale, v => GameSettings.HudScale = v);
+            ToggleRow(right, "Sprint toggle", () => GameSettings.SprintToggle, b => GameSettings.SprintToggle = b);
+            SliderRow(right, "Button size", 0.7f, 1.4f, () => GameSettings.HudScale, v => GameSettings.HudScale = v);
             SliderRow(right, "HUD opacity", 0.2f, 1f, () => GameSettings.HudOpacity, v => GameSettings.HudOpacity = v);
 
-            var back = MenuButton(settings.transform, "SAVE & BACK", CloseSettings, true);
-            Place((RectTransform)back.transform, new Vector2(0.5f, 0.08f), new Vector2(520, 90));
+            var back = TextButton(settings.transform, "SAVE  &  WAPAS", CloseSettings, 52);
+            Pin((RectTransform)back.transform, new Vector2(0, 0), new Vector2(120, 70), new Vector2(600, 80));
         }
+
+        // ============================================================ loading
+        static readonly string[] Tips =
+        {
+            "Torch ki roshni use door se dikhti hai.",
+            "Daudne ki awaaz 11 metre tak jaati hai. Jhuk ke chalo.",
+            "Har chhupne ki jagah surakshit nahi. Agar usne tumhe ghuste dekha... wo jaanta hai.",
+            "Loha ghasitne ki awaaz suno. Wo paas hai.",
+            "Generator ki awaaz poore gaon tak jaayegi.",
+            "Wo andhere se nahi, tumhare darr se aata hai.",
+        };
 
         void BuildLoading()
         {
-            loading = Panel("Loading", Color.black);
-            var t = Label(loading.transform, "ANDHVAN", 80, Blood, TextAnchor.MiddleCenter);
-            Place(t.rectTransform, new Vector2(0.5f, 0.6f), new Vector2(1000, 120));
-            loadingText = Label(loading.transform, "", 30, Dim, TextAnchor.MiddleCenter);
-            Place(loadingText.rectTransform, new Vector2(0.5f, 0.42f), new Vector2(1500, 120));
-            var bar = Img(loading.transform, rounded, new Color(1, 1, 1, 0.08f));
-            Place(bar.rectTransform, new Vector2(0.5f, 0.3f), new Vector2(700, 14));
+            loading = Layer("Loading");
+            Img(loading.transform, UISprites.Square, Color.black).rectTransform.Stretch();
+            var t = Label(loading.transform, "ANDHVAN", titleFont, 120, Blood, TextAnchor.MiddleCenter);
+            Pin(t.rectTransform, new Vector2(0.5f, 0.58f), Vector2.zero, new Vector2(1200, 180), new Vector2(0.5f, 0.5f));
+            loadingTip = Label(loading.transform, "", bodyFont, 34, Dim, TextAnchor.MiddleCenter);
+            Pin(loadingTip.rectTransform, new Vector2(0.5f, 0.4f), Vector2.zero, new Vector2(1400, 120), new Vector2(0.5f, 0.5f));
+            var bar = Img(loading.transform, UISprites.Square, new Color(1, 1, 1, 0.08f));
+            Pin(bar.rectTransform, new Vector2(0.5f, 0.26f), Vector2.zero, new Vector2(520, 3), new Vector2(0.5f, 0.5f));
             loadingFill = Fill(bar.transform, Blood);
         }
 
-        static readonly string[] Tips =
-        {
-            "Torch ON ho to wo tumhe door se dekh leta hai.",
-            "Daudne ki awaaz 11 metre tak jaati hai. Jhuk ke chalo.",
-            "Har chhupne ki jagah surakshit nahi. Agar usne tumhe ghuste dekha... wo jaanta hai.",
-            "Metal ghasitne ki awaaz suno. Wo paas hai.",
-            "Generator ki awaaz poore gaon tak jaayegi. Taiyaar raho.",
-        };
-
+        // ============================================================ HUD
         void BuildHud()
         {
-            hud = new GameObject("HUD", typeof(RectTransform), typeof(CanvasGroup));
-            hud.transform.SetParent(root, false);
-            Stretch((RectTransform)hud.transform);
-            hudGroup = hud.GetComponent<CanvasGroup>();
+            hud = Layer("HUD");
+            hudGroup = hud.AddComponent<CanvasGroup>();
 
-            // look pad: whole screen, behind everything else (buttons on top get priority)
-            var look = Img(hud.transform, white, new Color(0, 0, 0, 0));
-            Stretch(look.rectTransform);
+            // full-screen vignettes (no raycast)
+            fearVignette = Img(hud.transform, UISprites.Vignette, new Color(0, 0, 0, 0.6f)); fearVignette.rectTransform.Stretch(); fearVignette.raycastTarget = false;
+            damageVignette = Img(hud.transform, UISprites.Vignette, new Color(0.55f, 0f, 0f, 0f)); damageVignette.rectTransform.Stretch(); damageVignette.raycastTarget = false;
+
+            // look pad: whole screen, under all controls
+            var look = Img(hud.transform, UISprites.Square, new Color(0, 0, 0, 0)); look.rectTransform.Stretch();
             look.gameObject.AddComponent<TouchLookPad>();
 
-            // joystick zone: left 40%
-            var jz = Img(hud.transform, white, new Color(0, 0, 0, 0));
-            var jzr = jz.rectTransform; jzr.anchorMin = new Vector2(0, 0); jzr.anchorMax = new Vector2(0.4f, 0.75f); jzr.offsetMin = jzr.offsetMax = Vector2.zero;
-            var jBase = Img(jz.transform, circle, new Color(1, 1, 1, 0.12f)); jBase.rectTransform.sizeDelta = new Vector2(240, 240);
-            jBase.rectTransform.anchorMin = jBase.rectTransform.anchorMax = new Vector2(0, 0);
-            var knob = Img(jBase.transform, circle, new Color(1, 1, 1, 0.35f)); knob.rectTransform.sizeDelta = new Vector2(100, 100);
-            jBase.raycastTarget = knob.raycastTarget = false;
+            // joystick zone: left 42%, lower 80%
+            var jz = Img(hud.transform, UISprites.Square, new Color(0, 0, 0, 0));
+            Anchor(jz.rectTransform, Vector2.zero, new Vector2(0.42f, 0.8f));
+            var jBaseGo = new GameObject("JoyBase", typeof(RectTransform), typeof(CanvasGroup));
+            jBaseGo.transform.SetParent(jz.transform, false);
+            var jBase = (RectTransform)jBaseGo.transform;
+            jBase.anchorMin = jBase.anchorMax = Vector2.zero; jBase.sizeDelta = new Vector2(260, 260); jBase.anchoredPosition = new Vector2(260, 250);
+            var jFill = Img(jBase, UISprites.SoftCircle, new Color(0, 0, 0, 0.35f)); jFill.rectTransform.Stretch(); jFill.raycastTarget = false;
+            var jRing = Img(jBase, UISprites.Ring, new Color(Bone.r, Bone.g, Bone.b, 0.5f)); jRing.rectTransform.Stretch(); jRing.raycastTarget = false;
+            for (int i = 0; i < 4; i++)
+            {
+                var tick = Img(jBase, UISprites.Square, new Color(Bone.r, Bone.g, Bone.b, 0.35f)); tick.raycastTarget = false;
+                tick.rectTransform.sizeDelta = new Vector2(4, 14);
+                tick.rectTransform.localRotation = Quaternion.Euler(0, 0, i * 90);
+                tick.rectTransform.anchoredPosition = (Vector2)(Quaternion.Euler(0, 0, i * 90) * new Vector3(0, 104, 0));
+            }
+            var knob = Img(jBase, UISprites.Circle, new Color(Bone.r, Bone.g, Bone.b, 0.85f)); knob.rectTransform.sizeDelta = new Vector2(96, 96); knob.raycastTarget = false;
+            var knobInner = Img(knob.transform, UISprites.Circle, new Color(0.1f, 0.07f, 0.06f, 0.9f)); knobInner.rectTransform.sizeDelta = new Vector2(70, 70); knobInner.raycastTarget = false;
             var joy = jz.gameObject.AddComponent<VirtualJoystick>();
-            joy.baseRect = jBase.rectTransform; joy.knob = knob.rectTransform;
-            var jHint = Label(jz.transform, "chalne ke liye yahan dabao", 22, new Color(1, 1, 1, 0.18f), TextAnchor.LowerLeft);
-            jHint.raycastTarget = false;
-            Place(jHint.rectTransform, new Vector2(0.35f, 0.12f), new Vector2(500, 40));
+            joy.baseRect = jBase; joy.knob = knob.rectTransform; joy.group = jBaseGo.GetComponent<CanvasGroup>(); joy.radius = 105f;
 
-            // top-left stats
-            var stats = new GameObject("Stats", typeof(RectTransform)).GetComponent<RectTransform>();
-            stats.SetParent(hud.transform, false);
-            stats.anchorMin = stats.anchorMax = stats.pivot = new Vector2(0, 1);
-            stats.anchoredPosition = new Vector2(48, -40); stats.sizeDelta = new Vector2(360, 140);
-            healthFill = StatBar(stats, "HP", 0, new Color(0.7f, 0.08f, 0.06f));
-            batteryFill = StatBar(stats, "BAT", 1, new Color(0.95f, 0.8f, 0.3f));
-            staminaFill = StatBar(stats, "STA", 2, new Color(0.5f, 0.7f, 0.95f));
-            fuseText = Label(stats, "", 30, new Color(1f, 0.8f, 0.3f), TextAnchor.UpperLeft);
-            Place(fuseText.rectTransform, new Vector2(0, 1), new Vector2(360, 40), new Vector2(0, -130), new Vector2(0, 1));
+            // ---- top-left vitals: heart + bar, battery with 4 cells
+            var vit = Rect(hud.transform, "Vitals", new Vector2(0, 1), new Vector2(56, -44), new Vector2(420, 120), new Vector2(0, 1));
+            var heart = Img(vit, UISprites.IconHeart, new Color(0.85f, 0.15f, 0.12f, 0.95f)); Pin(heart.rectTransform, new Vector2(0, 1), Vector2.zero, new Vector2(38, 38), new Vector2(0, 1));
+            var hpBg = Img(vit, UISprites.Pill, new Color(1, 1, 1, 0.12f)); Pin(hpBg.rectTransform, new Vector2(0, 1), new Vector2(56, -14), new Vector2(240, 10), new Vector2(0, 1));
+            healthFill = Fill(hpBg.transform, new Color(0.8f, 0.12f, 0.1f));
+            var bat = Img(vit, UISprites.IconBattery, new Color(Bone.r, Bone.g, Bone.b, 0.9f)); Pin(bat.rectTransform, new Vector2(0, 1), new Vector2(-4, -54), new Vector2(46, 46), new Vector2(0, 1));
+            for (int i = 0; i < 4; i++)
+            {
+                var c = Img(vit, UISprites.Rounded, Ember);
+                Pin(c.rectTransform, new Vector2(0, 1), new Vector2(56 + i * 30, -64), new Vector2(24, 26), new Vector2(0, 1));
+                batteryCells[i] = c;
+            }
 
-            objectiveText = Label(hud.transform, "", 34, Bone, TextAnchor.UpperCenter);
-            objectiveText.raycastTarget = false;
-            Place(objectiveText.rectTransform, new Vector2(0.5f, 1f), new Vector2(1100, 60), new Vector2(0, -36), new Vector2(0.5f, 1));
-            messageText = Label(hud.transform, "", 36, Color.white, TextAnchor.MiddleCenter);
-            messageText.raycastTarget = false;
-            Place(messageText.rectTransform, new Vector2(0.5f, 0.3f), new Vector2(1300, 120));
+            // ---- objective (top centre)
+            var obj = Rect(hud.transform, "Objective", new Vector2(0.5f, 1), new Vector2(0, -34), new Vector2(1100, 70), new Vector2(0.5f, 1));
+            var oline = Img(obj, UISprites.Square, Blood); Pin(oline.rectTransform, new Vector2(0.5f, 1), new Vector2(0, -2), new Vector2(60, 3), new Vector2(0.5f, 1));
+            objectiveText = Label(obj, "", hudFont, 34, Bone, TextAnchor.UpperCenter);
+            Pin(objectiveText.rectTransform, new Vector2(0.5f, 1), new Vector2(0, -12), new Vector2(1100, 56), new Vector2(0.5f, 1));
+            AddShadow(objectiveText, new Color(0, 0, 0, 0.85f), 2);
 
-            // centre: crosshair, prompt, hold ring
-            var dot = Img(hud.transform, circle, new Color(1, 1, 1, 0.5f)); dot.raycastTarget = false;
-            Place(dot.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(8, 8));
-            holdRing = Img(hud.transform, circle, new Color(1f, 0.85f, 0.5f, 0.9f)); holdRing.raycastTarget = false;
-            holdRing.type = Image.Type.Filled; holdRing.fillMethod = Image.FillMethod.Radial360; holdRing.fillAmount = 0f;
-            Place(holdRing.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(70, 70));
-            promptText = Label(hud.transform, "", 30, Bone, TextAnchor.UpperCenter); promptText.raycastTarget = false;
-            Place(promptText.rectTransform, new Vector2(0.5f, 0.44f), new Vector2(900, 50));
+            // ---- message toast
+            var msg = Rect(hud.transform, "Message", new Vector2(0.5f, 0.27f), Vector2.zero, new Vector2(1400, 110), new Vector2(0.5f, 0.5f));
+            messageGroup = msg.gameObject.AddComponent<CanvasGroup>(); messageGroup.alpha = 0f;
+            messageText = Label(msg, "", bodyFont, 38, Bone, TextAnchor.MiddleCenter); messageText.rectTransform.Stretch();
+            AddShadow(messageText, new Color(0, 0, 0, 0.95f), 3);
 
-            // right-side buttons
-            hudButtons = new GameObject("Buttons", typeof(RectTransform)).GetComponent<RectTransform>();
-            hudButtons.SetParent(hud.transform, false);
-            hudButtons.anchorMin = hudButtons.anchorMax = hudButtons.pivot = new Vector2(1, 0);
-            hudButtons.anchoredPosition = new Vector2(-40, 40); hudButtons.sizeDelta = new Vector2(560, 520);
-            btnInteract = RoundButton(hudButtons, "HAATH", new Vector2(-110, 150), 190);
+            // ---- centre: crosshair + prompt
+            crosshair = Img(hud.transform, UISprites.Circle, new Color(1, 1, 1, 0.55f)); crosshair.raycastTarget = false;
+            Pin(crosshair.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(8, 8), new Vector2(0.5f, 0.5f));
+            var prm = Rect(hud.transform, "Prompt", new Vector2(0.5f, 0.5f), new Vector2(0, -70), new Vector2(900, 60), new Vector2(0.5f, 0.5f));
+            promptGroup = prm.gameObject.AddComponent<CanvasGroup>(); promptGroup.alpha = 0f;
+            promptText = Label(prm, "", hudFont, 32, Bone, TextAnchor.MiddleCenter); promptText.rectTransform.Stretch();
+            AddShadow(promptText, new Color(0, 0, 0, 0.9f), 2);
+
+            // ---- stamina (thin bar under the crosshair, only while used)
+            var st = Rect(hud.transform, "Stamina", new Vector2(0.5f, 0.5f), new Vector2(0, -120), new Vector2(220, 6), new Vector2(0.5f, 0.5f));
+            staminaGroup = st.gameObject.AddComponent<CanvasGroup>(); staminaGroup.alpha = 0f;
+            var stBg = Img(st, UISprites.Pill, new Color(1, 1, 1, 0.15f)); stBg.rectTransform.Stretch();
+            staminaFill = Fill(stBg.transform, Bone);
+
+            // ---- right-hand controls
+            hudButtons = Rect(hud.transform, "Buttons", new Vector2(1, 0), new Vector2(-30, 30), new Vector2(620, 600), new Vector2(1, 0));
+            btnInteract = IconButton(hudButtons, UISprites.IconHand, "", new Vector2(-150, 200), 200, true);
             btnInteract.onHeld = b => InputBridge.TouchInteractHeld = b;
-            btnSprint = RoundButton(hudButtons, "DAUDO", new Vector2(-330, 90), 140);
+            interactGroup = btnInteract.gameObject.AddComponent<CanvasGroup>();
+            btnSprint = IconButton(hudButtons, UISprites.IconRun, "DAUDO", new Vector2(-375, 120), 140, false);
             btnSprint.onHeld = b => InputBridge.TouchSprintHeld = b;
-            btnCrouch = RoundButton(hudButtons, "JHUKO", new Vector2(-330, 260), 120);
+            btnCrouch = IconButton(hudButtons, UISprites.IconCrouch, "JHUKO", new Vector2(-395, 305), 116, false);
             btnCrouch.onTap = () => InputBridge.TouchCrouchToggle = true;
-            btnFlash = RoundButton(hudButtons, "TORCH", new Vector2(-110, 360), 130);
-            btnFlash.onTap = () => InputBridge.TouchFlashlightToggle = true;
-            var btnInv = RoundButton(hudButtons, "BAG", new Vector2(-470, 200), 110);
-            btnInv.onTap = ToggleInventory;
+            btnTorch = IconButton(hudButtons, UISprites.IconTorch, "TORCH", new Vector2(-150, 420), 116, false);
+            btnTorch.onTap = () => InputBridge.TouchFlashlightToggle = true;
+            var bag = IconButton(hudButtons, UISprites.IconBag, "BAG", new Vector2(-290, 470), 96, false);
+            bag.onTap = ToggleInventory;
+            var badge = Img(bag.transform, UISprites.Circle, Blood); Pin(badge.rectTransform, new Vector2(1, 1), new Vector2(4, 4), new Vector2(34, 34), new Vector2(1, 1)); badge.raycastTarget = false;
+            bagBadge = Label(badge.transform, "", hudFont, 22, Color.white, TextAnchor.MiddleCenter); bagBadge.rectTransform.Stretch();
 
-            var pauseBtn = RoundButton((RectTransform)hud.transform, "II", Vector2.zero, 90);
-            var pr = (RectTransform)pauseBtn.transform; pr.anchorMin = pr.anchorMax = new Vector2(1, 1); pr.anchoredPosition = new Vector2(-70, -60);
+            var pauseBtn = IconButton((RectTransform)hud.transform, UISprites.IconPause, "", Vector2.zero, 84, false);
+            var pr = (RectTransform)pauseBtn.transform; pr.anchorMin = pr.anchorMax = new Vector2(1, 1); pr.anchoredPosition = new Vector2(-70, -64);
             pauseBtn.onTap = () => gm.Pause();
-
-            damageFlash = Img(root, white, new Color(0.6f, 0f, 0f, 0f)); damageFlash.raycastTarget = false;
-            Stretch(damageFlash.rectTransform);
         }
 
-        Image StatBar(RectTransform parent, string icon, int row, Color c)
+        HoldButton IconButton(RectTransform parent, Sprite icon, string label, Vector2 pos, float size, bool withProgress)
         {
-            var ic = Label(parent, icon, 22, c, TextAnchor.MiddleLeft);
-            Place(ic.rectTransform, new Vector2(0, 1), new Vector2(60, 36), new Vector2(0, -row * 40), new Vector2(0, 1));
-            var bg = Img(parent, rounded, new Color(1, 1, 1, 0.1f));
-            Place(bg.rectTransform, new Vector2(0, 1), new Vector2(260, 14), new Vector2(64, -row * 40 - 11), new Vector2(0, 1));
-            return Fill(bg.transform, c);
+            var go = new GameObject("btn_" + label, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            var r = (RectTransform)go.transform; r.anchorMin = r.anchorMax = new Vector2(1, 0); r.sizeDelta = new Vector2(size, size); r.anchoredPosition = pos;
+            var bg = Img(r, UISprites.Circle, new Color(0, 0, 0, 0.35f)); bg.rectTransform.Stretch();   // raycast target
+            var ring = Img(r, UISprites.Ring, Bone); ring.rectTransform.Stretch(); ring.raycastTarget = false;
+            var ic = Img(r, icon, Bone); ic.raycastTarget = false; ic.rectTransform.sizeDelta = new Vector2(size * 0.5f, size * 0.5f);
+            Image prog = null;
+            if (withProgress)
+            {
+                prog = Img(r, UISprites.RingThick, Ember); prog.rectTransform.Stretch(); prog.raycastTarget = false;
+                prog.type = Image.Type.Filled; prog.fillMethod = Image.FillMethod.Radial360; prog.fillOrigin = 2; prog.fillAmount = 0f;
+            }
+            if (label.Length > 0)
+            {
+                var t = Label(r, label, hudFont, 22, new Color(Bone.r, Bone.g, Bone.b, 0.75f), TextAnchor.UpperCenter);
+                Pin(t.rectTransform, new Vector2(0.5f, 0), new Vector2(0, -6), new Vector2(200, 30), new Vector2(0.5f, 1));
+            }
+            var hb = go.AddComponent<HoldButton>();
+            hb.background = bg; hb.ring = ring; hb.icon = ic; hb.progress = prog;
+            return hb;
         }
 
+        // ============================================================ inventory / note
         void BuildInventory()
         {
-            inventoryPanel = Panel("Inventory", PanelBg);
-            var t = Label(inventoryPanel.transform, "BAG", 64, Bone, TextAnchor.MiddleCenter);
-            Place(t.rectTransform, new Vector2(0.5f, 0.82f), new Vector2(800, 90));
-            invText = Label(inventoryPanel.transform, "", 38, Bone, TextAnchor.UpperLeft);
-            Place(invText.rectTransform, new Vector2(0.5f, 0.55f), new Vector2(800, 300));
-            var col = Column(inventoryPanel.transform, new Vector2(0.5f, 0.24f), 520, 16);
-            MenuButton(col, "BATTERY LAGAO", () => { var p = gm.Player; if (p != null) p.Inventory.UseBattery(); RefreshInventory(); }, true);
-            MenuButton(col, "MEDKIT USE KARO", () => { var p = gm.Player; if (p != null) p.Inventory.UseMedkit(); RefreshInventory(); }, false);
-            MenuButton(col, "BAND KARO", ToggleInventory, false);
+            inventoryPanel = Layer("Inventory");
+            Img(inventoryPanel.transform, UISprites.Square, new Color(0, 0, 0, 0.75f)).rectTransform.Stretch();
+            var card = Img(inventoryPanel.transform, UISprites.Rounded, new Color(0.06f, 0.045f, 0.04f, 0.97f));
+            Pin(card.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(900, 640), new Vector2(0.5f, 0.5f));
+            var t = Label(card.transform, "BAG", hudFont, 60, Bone, TextAnchor.UpperLeft);
+            Pin(t.rectTransform, new Vector2(0, 1), new Vector2(60, -40), new Vector2(600, 80), new Vector2(0, 1));
+            invText = Label(card.transform, "", bodyFont, 36, Bone, TextAnchor.UpperLeft);
+            Pin(invText.rectTransform, new Vector2(0, 1), new Vector2(60, -140), new Vector2(780, 260), new Vector2(0, 1));
+            var row = Rect(card.transform, "Actions", new Vector2(0.5f, 0), new Vector2(0, 50), new Vector2(800, 90), new Vector2(0.5f, 0));
+            var h = row.gameObject.AddComponent<HorizontalLayoutGroup>();
+            h.spacing = 20; h.childControlWidth = true; h.childControlHeight = true; h.childForceExpandWidth = true; h.childForceExpandHeight = true;
+            PillButton(row, "BATTERY LAGAO", () => { var p = gm.Player; if (p != null) p.Inventory.UseBattery(); RefreshInventory(); }, true);
+            PillButton(row, "MEDKIT", () => { var p = gm.Player; if (p != null) p.Inventory.UseMedkit(); RefreshInventory(); }, false);
+            PillButton(row, "BAND", ToggleInventory, false);
         }
 
         void BuildNote()
         {
-            notePanel = Panel("Note", new Color(0f, 0f, 0f, 0.6f));
-            var paper = Img(notePanel.transform, rounded, new Color(0.82f, 0.76f, 0.62f, 0.97f));
-            Place(paper.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(1000, 760));
-            noteTitle = Label(paper.transform, "", 44, new Color(0.25f, 0.05f, 0.02f), TextAnchor.UpperCenter);
-            Place(noteTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(900, 70), new Vector2(0, -40), new Vector2(0.5f, 1));
-            noteBody = Label(paper.transform, "", 32, new Color(0.15f, 0.1f, 0.08f), TextAnchor.UpperLeft);
-            Place(noteBody.rectTransform, new Vector2(0.5f, 0.45f), new Vector2(860, 560));
-            var close = MenuButton(notePanel.transform, "RAKH DO", () => notePanel.SetActive(false), false);
-            Place((RectTransform)close.transform, new Vector2(0.5f, 0.06f), new Vector2(420, 80));
+            notePanel = Layer("Note");
+            Img(notePanel.transform, UISprites.Square, new Color(0, 0, 0, 0.7f)).rectTransform.Stretch();
+            var paper = Img(notePanel.transform, UISprites.Paper, Color.white);
+            Pin(paper.rectTransform, new Vector2(0.5f, 0.53f), Vector2.zero, new Vector2(980, 780), new Vector2(0.5f, 0.5f));
+            paper.rectTransform.localRotation = Quaternion.Euler(0, 0, -1.5f);
+            noteTitle = Label(paper.transform, "", bodyFont, 42, new Color(0.35f, 0.04f, 0.02f), TextAnchor.UpperLeft);
+            Pin(noteTitle.rectTransform, new Vector2(0, 1), new Vector2(70, -60), new Vector2(840, 70), new Vector2(0, 1));
+            noteBody = Label(paper.transform, "", bodyFont, 32, new Color(0.14f, 0.1f, 0.08f), TextAnchor.UpperLeft);
+            Pin(noteBody.rectTransform, new Vector2(0, 1), new Vector2(70, -150), new Vector2(840, 560), new Vector2(0, 1));
+            noteBody.lineSpacing = 1.15f;
+            var close = TextButton(notePanel.transform, "RAKH DO", () => notePanel.SetActive(false), 44);
+            Pin((RectTransform)close.transform, new Vector2(0.5f, 0), new Vector2(0, 40), new Vector2(400, 70), new Vector2(0.5f, 0));
+            ((Text)close.targetGraphic).alignment = TextAnchor.MiddleCenter;
         }
 
+        // ============================================================ pause / end
         void BuildPause()
         {
-            pause = Panel("Pause", PanelBg);
-            var t = Label(pause.transform, "RUKO", 90, Bone, TextAnchor.MiddleCenter);
-            Place(t.rectTransform, new Vector2(0.5f, 0.75f), new Vector2(800, 120));
-            var col = Column(pause.transform, new Vector2(0.5f, 0.42f), 520, 20);
-            MenuButton(col, "WAPAS KHELO", () => gm.Resume(), true);
-            MenuButton(col, "SETTINGS", () => OpenSettings(pause), false);
-            MenuButton(col, "RESTART", () => gm.Restart(), false);
-            MenuButton(col, "MAIN MENU", () => gm.ToMainMenu(), false);
+            pause = Layer("Pause");
+            Img(pause.transform, UISprites.Square, new Color(0, 0, 0, 0.82f)).rectTransform.Stretch();
+            var t = Label(pause.transform, "RUKO", titleFont, 140, Bone, TextAnchor.LowerLeft);
+            Pin(t.rectTransform, new Vector2(0, 1), new Vector2(120, -120), new Vector2(1000, 200));
+            var col = Column(pause.transform, new Vector2(0, 1), new Vector2(120, -380), 560, 6, TextAnchor.UpperLeft);
+            TextButton(col, "WAPAS KHELO", () => gm.Resume(), 60);
+            TextButton(col, "SETTINGS", () => OpenSettings(pause), 60);
+            TextButton(col, "RESTART", () => gm.Restart(), 60);
+            TextButton(col, "MAIN MENU", () => gm.ToMainMenu(), 60);
         }
 
         void BuildEndScreens()
         {
-            gameOver = Panel("GameOver", new Color(0.12f, 0f, 0f, 0.88f));
-            var t = Label(gameOver.transform, "WO TUMHE LE GAYA", 100, Blood, TextAnchor.MiddleCenter);
-            Place(t.rectTransform, new Vector2(0.5f, 0.7f), new Vector2(1600, 140));
-            gameOverStats = Label(gameOver.transform, "", 32, Dim, TextAnchor.MiddleCenter);
-            Place(gameOverStats.rectTransform, new Vector2(0.5f, 0.55f), new Vector2(1400, 100));
-            var c1 = Column(gameOver.transform, new Vector2(0.5f, 0.3f), 520, 20);
-            MenuButton(c1, "PHIR KOSHISH KARO", () => gm.Restart(), true);
-            MenuButton(c1, "MAIN MENU", () => gm.ToMainMenu(), false);
+            gameOver = Layer("GameOver");
+            var red = Img(gameOver.transform, UISprites.Vignette, new Color(0.45f, 0f, 0f, 1f)); red.rectTransform.Stretch();
+            Img(gameOver.transform, UISprites.Square, new Color(0, 0, 0, 0.7f)).rectTransform.Stretch();
+            var t = Label(gameOver.transform, "WO TUMHE LE GAYA", titleFont, 140, Blood, TextAnchor.MiddleCenter);
+            Pin(t.rectTransform, new Vector2(0.5f, 0.66f), Vector2.zero, new Vector2(1700, 200), new Vector2(0.5f, 0.5f));
+            AddShadow(t, Color.black, 6);
+            gameOverStats = Label(gameOver.transform, "", hudFont, 32, Dim, TextAnchor.MiddleCenter);
+            Pin(gameOverStats.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1400, 60), new Vector2(0.5f, 0.5f));
+            var r1 = Rect(gameOver.transform, "Buttons", new Vector2(0.5f, 0.25f), Vector2.zero, new Vector2(900, 90), new Vector2(0.5f, 0.5f));
+            var h1 = r1.gameObject.AddComponent<HorizontalLayoutGroup>(); h1.spacing = 30; h1.childControlWidth = true; h1.childControlHeight = true; h1.childForceExpandWidth = true; h1.childForceExpandHeight = true;
+            PillButton(r1, "PHIR KOSHISH", () => gm.Restart(), true);
+            PillButton(r1, "MAIN MENU", () => gm.ToMainMenu(), false);
 
-            escaped = Panel("Escaped", new Color(0f, 0f, 0f, 0.9f));
-            var e = Label(escaped.transform, "TUM BACH NIKLE", 100, Bone, TextAnchor.MiddleCenter);
-            Place(e.rectTransform, new Vector2(0.5f, 0.72f), new Vector2(1600, 140));
-            var e2 = Label(escaped.transform, "...par 37 log abhi bhi wahin hain. Ye sirf pehli raat thi.", 34, Blood, TextAnchor.MiddleCenter);
-            Place(e2.rectTransform, new Vector2(0.5f, 0.6f), new Vector2(1600, 60));
-            escapedStats = Label(escaped.transform, "", 32, Dim, TextAnchor.MiddleCenter);
-            Place(escapedStats.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(1400, 80));
-            var c2 = Column(escaped.transform, new Vector2(0.5f, 0.26f), 520, 20);
-            MenuButton(c2, "PHIR SE KHELO", () => gm.Restart(), true);
-            MenuButton(c2, "MAIN MENU", () => gm.ToMainMenu(), false);
+            escaped = Layer("Escaped");
+            Img(escaped.transform, UISprites.Square, new Color(0, 0, 0, 0.92f)).rectTransform.Stretch();
+            var e = Label(escaped.transform, "TUM BACH NIKLE", titleFont, 140, Bone, TextAnchor.MiddleCenter);
+            Pin(e.rectTransform, new Vector2(0.5f, 0.68f), Vector2.zero, new Vector2(1700, 200), new Vector2(0.5f, 0.5f));
+            var e2 = Label(escaped.transform, "...par 37 log abhi bhi wahin hain. Ye sirf pehli raat thi.", bodyFont, 36, Blood, TextAnchor.MiddleCenter);
+            Pin(e2.rectTransform, new Vector2(0.5f, 0.55f), Vector2.zero, new Vector2(1600, 70), new Vector2(0.5f, 0.5f));
+            escapedStats = Label(escaped.transform, "", hudFont, 30, Dim, TextAnchor.MiddleCenter);
+            Pin(escapedStats.rectTransform, new Vector2(0.5f, 0.45f), Vector2.zero, new Vector2(1400, 100), new Vector2(0.5f, 0.5f));
+            var r2 = Rect(escaped.transform, "Buttons", new Vector2(0.5f, 0.24f), Vector2.zero, new Vector2(900, 90), new Vector2(0.5f, 0.5f));
+            var h2 = r2.gameObject.AddComponent<HorizontalLayoutGroup>(); h2.spacing = 30; h2.childControlWidth = true; h2.childControlHeight = true; h2.childForceExpandWidth = true; h2.childForceExpandHeight = true;
+            PillButton(r2, "PHIR SE KHELO", () => gm.Restart(), true);
+            PillButton(r2, "MAIN MENU", () => gm.ToMainMenu(), false);
         }
 
         // ============================================================ state & per-frame
@@ -313,22 +385,16 @@ namespace TheLastNight
                 case GameState.MainMenu: ShowOnly(mainMenu); break;
                 case GameState.Loading:
                     ShowOnly(loading);
-                    loadingText.text = Tips[UnityEngine.Random.Range(0, Tips.Length)];
+                    loadingTip.text = Tips[UnityEngine.Random.Range(0, Tips.Length)];
                     break;
                 case GameState.Playing: ShowOnly(hud); break;
-                case GameState.Paused: ShowOnly(pause); hud.SetActive(false); break;
-                case GameState.GameOver:
-                    ShowOnly(gameOver);
-                    gameOverStats.text = Stats();
-                    break;
-                case GameState.Escaped:
-                    ShowOnly(escaped);
-                    escapedStats.text = Stats() + "\nENDING: \"Pehli Raat\" (slice)";
-                    break;
+                case GameState.Paused: ShowOnly(pause); break;
+                case GameState.GameOver: ShowOnly(gameOver); gameOverStats.text = Stats(); break;
+                case GameState.Escaped: ShowOnly(escaped); escapedStats.text = Stats() + "\nENDING  ·  PEHLI RAAT"; break;
             }
         }
 
-        string Stats() { return string.Format("Samay: {0}:{1:00}   •   Fuses: {2}/{3}   •   Notes: {4}", (int)(gm.PlayTime / 60), (int)(gm.PlayTime % 60), gm.FusesInserted, gm.fusesRequired, gm.NotesFound); }
+        string Stats() { return string.Format("SAMAY {0}:{1:00}     FUSE {2}/{3}     NOTES {4}", (int)(gm.PlayTime / 60), (int)(gm.PlayTime % 60), gm.FusesInserted, gm.fusesRequired, gm.NotesFound); }
 
         void ShowOnly(GameObject panel)
         {
@@ -339,31 +405,67 @@ namespace TheLastNight
         void Update()
         {
             if (gm == null) return;
+            float dt = Time.unscaledDeltaTime;
+            if (mainMenu.activeSelf)
+            {
+                // flickering title
+                float f = Mathf.PerlinNoise(Time.unscaledTime * 3f, 0f) > 0.78f ? 0.35f : 1f;
+                titleText.color = new Color(Blood.r, Blood.g, Blood.b, Mathf.MoveTowards(titleText.color.a, f, dt * 12f));
+            }
             if (loading.activeSelf) loadingFill.fillAmount = ProceduralAudio.Progress;
             if (!hud.activeSelf) return;
             var p = gm.Player;
             if (p == null) return;
-            if (!damageHooked) { damageHooked = true; p.Health.Damaged += a => FlashDamage(); }
+            if (!damageHooked) { damageHooked = true; p.Health.Damaged += a => damageVignette.color = new Color(0.6f, 0f, 0f, 0.85f); }
             InputBridge.Poll();
             if (InputBridge.InventoryPressed) ToggleInventory();
 
+            // prompt + context-sensitive interact button
             var it = p.GetComponent<Interactor>();
-            promptText.text = it != null && it.CurrentPrompt != null ? it.CurrentPrompt : "";
-            holdRing.fillAmount = it != null ? it.HoldProgress : 0f;
-            if (messageText.text.Length > 0 && Time.unscaledTime > messageUntil) messageText.text = "";
-            healthFill.fillAmount = p.Health.Health01;
-            batteryFill.fillAmount = p.Flashlight != null ? p.Flashlight.Charge01 : 0f;
+            bool canInteract = it != null && it.CurrentPrompt != null;
+            if (canInteract) promptText.text = it.CurrentPrompt.ToUpperInvariant();
+            promptGroup.alpha = Mathf.MoveTowards(promptGroup.alpha, canInteract ? 1f : 0f, dt * 6f);
+            interactGroup.alpha = Mathf.MoveTowards(interactGroup.alpha, canInteract ? 1f : 0.28f, dt * 6f);
+            btnInteract.SetActiveVisual(canInteract);
+            btnInteract.SetProgress(it != null ? it.HoldProgress : 0f);
+            crosshair.rectTransform.sizeDelta = Vector2.one * Mathf.MoveTowards(crosshair.rectTransform.sizeDelta.x, canInteract ? 18f : 8f, dt * 80f);
+            crosshair.color = canInteract ? Ember : new Color(1, 1, 1, 0.55f);
+
+            // message toast + objective flash
+            messageGroup.alpha = Mathf.MoveTowards(messageGroup.alpha, Time.unscaledTime < messageUntil ? 1f : 0f, dt * 3f);
+            objectiveFlash = Mathf.MoveTowards(objectiveFlash, 0f, dt * 0.8f);
+            objectiveText.color = Color.Lerp(Bone, Ember, objectiveFlash);
+
+            // vitals
+            healthFill.fillAmount = Mathf.MoveTowards(healthFill.fillAmount, p.Health.Health01, dt * 2f);
+            float charge = p.Flashlight != null ? p.Flashlight.Charge01 : 0f;
+            for (int i = 0; i < 4; i++)
+            {
+                float cell = Mathf.Clamp01(charge * 4f - i);
+                bool low = charge < 0.18f;
+                float blink = low ? (Mathf.Sin(Time.unscaledTime * 10f) > 0 ? 1f : 0.3f) : 1f;
+                batteryCells[i].color = new Color(low ? 0.9f : Ember.r, low ? 0.15f : Ember.g, low ? 0.1f : Ember.b, (cell > 0.05f ? 0.3f + 0.7f * cell : 0.08f) * blink);
+            }
+            bool usingStamina = p.Stamina01 < 0.99f;
+            staminaGroup.alpha = Mathf.MoveTowards(staminaGroup.alpha, usingStamina ? 1f : 0f, dt * 3f);
             staminaFill.fillAmount = p.Stamina01;
-            staminaFill.color = p.Tired ? new Color(0.4f, 0.4f, 0.4f) : new Color(0.5f, 0.7f, 0.95f);
-            fuseText.text = string.Format("FUSE {0}   BATTERY {1}", p.Inventory.Fuses, p.Inventory.Batteries);
+            staminaFill.color = p.Tired ? new Color(0.5f, 0.5f, 0.5f) : Bone;
+
             btnCrouch.SetActiveVisual(p.IsCrouching);
-            btnFlash.SetActiveVisual(p.Flashlight != null && p.Flashlight.IsOn);
-            float hurt = 1f - p.Health.Health01;
-            damageFlash.color = new Color(0.5f, 0f, 0f, Mathf.MoveTowards(damageFlash.color.a, hurt > 0.5f ? hurt * 0.12f : 0f, Time.deltaTime));
+            btnTorch.SetActiveVisual(p.Flashlight != null && p.Flashlight.IsOn);
+            btnSprint.SetActiveVisual(p.IsSprinting);
+            int items = p.Inventory.Batteries + p.Inventory.Fuses + p.Inventory.Medkits;
+            bagBadge.text = items > 0 ? items.ToString() : "";
+            bagBadge.transform.parent.gameObject.SetActive(items > 0);
+
+            // fear + damage vignettes
+            float fear = p.Health.Fear, hurt = 1f - p.Health.Health01;
+            fearVignette.color = new Color(0, 0, 0, 0.45f + fear * 0.4f);
+            float pulse = hurt > 0.5f ? (Mathf.Sin(Time.unscaledTime * 6f) * 0.5f + 0.5f) * hurt * 0.4f : 0f;
+            var dc = damageVignette.color; dc.a = Mathf.Max(Mathf.MoveTowards(dc.a, 0f, dt * 1.2f), pulse); damageVignette.color = dc;
+
             if (inventoryPanel.activeSelf) RefreshInventory();
         }
-
-        public void FlashDamage() { damageFlash.color = new Color(0.6f, 0f, 0f, 0.45f); }
 
         void ToggleInventory()
         {
@@ -375,30 +477,34 @@ namespace TheLastNight
         void RefreshInventory()
         {
             var p = gm.Player; if (p == null) return;
-            invText.text = string.Format("Fuse:  {0}\nBattery:  {1}  (torch {2:0}%)\nMedkit:  {3}\nNotes mile:  {4}",
+            invText.text = string.Format("Fuse            {0}\nBattery         {1}     (torch {2:0}%)\nMedkit          {3}\nNotes mile      {4}",
                 p.Inventory.Fuses, p.Inventory.Batteries, p.Flashlight != null ? p.Flashlight.Charge01 * 100f : 0f, p.Inventory.Medkits, gm.NotesFound);
         }
 
         void OpenSettings(GameObject from) { settingsReturnTo = from; ShowOnly(settings); }
-        void CloseSettings()
-        {
-            GameSettings.Save();
-            ShowOnly(settingsReturnTo != null ? settingsReturnTo : mainMenu);
-        }
+        void CloseSettings() { GameSettings.Save(); ShowOnly(settingsReturnTo != null ? settingsReturnTo : mainMenu); }
 
         void ApplyHudSettings()
         {
-            if (hudGroup != null) hudGroup.alpha = GameSettings.HudOpacity;
+            if (hudGroup != null) hudGroup.alpha = Mathf.Lerp(0.5f, 1f, GameSettings.HudOpacity);
             if (hudButtons != null) hudButtons.localScale = Vector3.one * GameSettings.HudScale;
         }
 
         // ============================================================ widget helpers
-        GameObject Panel(string name, Color bg)
+        GameObject Layer(string name)
         {
-            var img = Img(root, white, bg);
-            img.name = name;
-            Stretch(img.rectTransform);
-            return img.gameObject;
+            var go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(root, false);
+            ((RectTransform)go.transform).Stretch();
+            return go;
+        }
+
+        RectTransform Rect(Transform parent, string name, Vector2 anchor, Vector2 pos, Vector2 size, Vector2 pivot)
+        {
+            var r = new GameObject(name, typeof(RectTransform)).GetComponent<RectTransform>();
+            r.SetParent(parent, false);
+            Pin(r, anchor, pos, size, pivot);
+            return r;
         }
 
         Image Img(Transform parent, Sprite sprite, Color c)
@@ -407,20 +513,20 @@ namespace TheLastNight
             go.transform.SetParent(parent, false);
             var i = go.GetComponent<Image>();
             i.sprite = sprite; i.color = c;
-            if (sprite == rounded) i.type = Image.Type.Sliced;
+            if (sprite == UISprites.Rounded || sprite == UISprites.Pill || sprite == UISprites.Square) i.type = Image.Type.Sliced;
             return i;
         }
 
         Image Fill(Transform parent, Color c)
         {
-            var f = Img(parent, white, c);
-            Stretch(f.rectTransform);
+            var f = Img(parent, UISprites.Pill, c);
+            f.rectTransform.Stretch();
             f.type = Image.Type.Filled; f.fillMethod = Image.FillMethod.Horizontal; f.fillAmount = 1f;
             f.raycastTarget = false;
             return f;
         }
 
-        Text Label(Transform parent, string text, int size, Color c, TextAnchor anchor)
+        Text Label(Transform parent, string text, Font font, int size, Color c, TextAnchor anchor)
         {
             var go = new GameObject("txt", typeof(RectTransform), typeof(Text));
             go.transform.SetParent(parent, false);
@@ -431,81 +537,87 @@ namespace TheLastNight
             return t;
         }
 
-        static void Stretch(RectTransform r) { r.anchorMin = Vector2.zero; r.anchorMax = Vector2.one; r.offsetMin = r.offsetMax = Vector2.zero; }
-
-        static void Place(RectTransform r, Vector2 anchor, Vector2 size) { Place(r, anchor, size, Vector2.zero, new Vector2(0.5f, 0.5f)); }
-        static void Place(RectTransform r, Vector2 anchor, Vector2 size, Vector2 offset, Vector2 pivot)
+        static void AddShadow(Text t, Color c, float dist)
         {
-            r.anchorMin = r.anchorMax = anchor; r.pivot = pivot; r.sizeDelta = size; r.anchoredPosition = offset;
+            var s = t.gameObject.AddComponent<UnityEngine.UI.Shadow>();
+            s.effectColor = c; s.effectDistance = new Vector2(dist, -dist);
         }
 
-        RectTransform Column(Transform parent, Vector2 anchor, float width, float spacing)
+        static void Anchor(RectTransform r, Vector2 min, Vector2 max) { r.anchorMin = min; r.anchorMax = max; r.offsetMin = r.offsetMax = Vector2.zero; }
+        static void Pin(RectTransform r, Vector2 anchor, Vector2 pos, Vector2 size) { Pin(r, anchor, pos, size, new Vector2(0, 1)); }
+        static void Pin(RectTransform r, Vector2 anchor, Vector2 pos, Vector2 size, Vector2 pivot)
+        {
+            r.anchorMin = r.anchorMax = anchor; r.pivot = pivot; r.sizeDelta = size; r.anchoredPosition = pos;
+        }
+
+        RectTransform Column(Transform parent, Vector2 anchor, Vector2 pos, float width, float spacing, TextAnchor align)
         {
             var go = new GameObject("col", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
             go.transform.SetParent(parent, false);
             var r = (RectTransform)go.transform;
-            Place(r, anchor, new Vector2(width, 0));
+            Pin(r, anchor, pos, new Vector2(width, 0), new Vector2(0, 1));
             var v = go.GetComponent<VerticalLayoutGroup>();
             v.spacing = spacing; v.childControlWidth = true; v.childControlHeight = false; v.childForceExpandWidth = true; v.childForceExpandHeight = false;
-            v.childAlignment = TextAnchor.MiddleCenter;
+            v.childAlignment = align;
             go.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             return r;
         }
 
-        Button MenuButton(Transform parent, string label, Action onClick, bool primary)
+        /// <summary>Menu item: plain bone text that turns blood-red with a dash when pressed.</summary>
+        Button TextButton(Transform parent, string label, Action onClick, int size)
         {
-            var img = Img(parent, rounded, primary ? new Color(0.45f, 0.03f, 0.02f, 0.95f) : new Color(0.12f, 0.08f, 0.07f, 0.95f));
-            img.name = "btn_" + label;
-            ((RectTransform)img.transform).sizeDelta = new Vector2(520, 86);
-            var b = img.gameObject.AddComponent<Button>();
-            var cb = b.colors; cb.highlightedColor = new Color(1f, 0.85f, 0.8f); cb.pressedColor = new Color(0.6f, 0.3f, 0.3f); b.colors = cb;
+            var t = Label(parent, label, hudFont, size, Bone, TextAnchor.MiddleLeft);
+            t.raycastTarget = true;
+            ((RectTransform)t.transform).sizeDelta = new Vector2(560, size * 1.35f);
+            var b = t.gameObject.AddComponent<Button>();
+            b.targetGraphic = t;
+            var cb = b.colors;
+            cb.normalColor = Color.white; cb.highlightedColor = new Color(1f, 0.55f, 0.45f); cb.pressedColor = new Color(0.9f, 0.1f, 0.06f); cb.selectedColor = Color.white;
+            cb.fadeDuration = 0.08f; b.colors = cb;
             b.onClick.AddListener(() => { if (AudioManager.Instance != null) AudioManager.Instance.PlayUI(ProceduralAudio.Click, 0.5f); onClick(); });
-            var t = Label(img.transform, label, 34, Bone, TextAnchor.MiddleCenter);
-            Stretch(t.rectTransform);
             return b;
         }
 
-        HoldButton RoundButton(RectTransform parent, string label, Vector2 pos, float size)
+        Button PillButton(Transform parent, string label, Action onClick, bool primary)
         {
-            var img = Img(parent, circle, new Color(1, 1, 1, 0.18f));
-            img.name = "hud_" + label;
-            var r = img.rectTransform; r.anchorMin = r.anchorMax = new Vector2(1, 0); r.sizeDelta = new Vector2(size, size); r.anchoredPosition = pos;
-            var t = Label(img.transform, label, Mathf.RoundToInt(size * 0.2f), Bone, TextAnchor.MiddleCenter);
-            Stretch(t.rectTransform);
-            var hb = img.gameObject.AddComponent<HoldButton>();
-            hb.graphic = img;
-            return hb;
+            var img = Img(parent, UISprites.Pill, primary ? new Color(0.55f, 0.04f, 0.03f, 0.95f) : new Color(1, 1, 1, 0.07f));
+            ((RectTransform)img.transform).sizeDelta = new Vector2(260, 84);
+            var b = img.gameObject.AddComponent<Button>();
+            var cb = b.colors; cb.highlightedColor = new Color(1f, 0.85f, 0.8f); cb.pressedColor = new Color(0.6f, 0.3f, 0.3f); b.colors = cb;
+            b.onClick.AddListener(() => { if (AudioManager.Instance != null) AudioManager.Instance.PlayUI(ProceduralAudio.Click, 0.5f); onClick(); });
+            var t = Label(img.transform, label, hudFont, 30, Bone, TextAnchor.MiddleCenter);
+            t.rectTransform.Stretch();
+            return b;
         }
 
         void Header(Transform parent, string text)
         {
-            var t = Label(parent, text, 30, Blood, TextAnchor.LowerLeft);
-            ((RectTransform)t.transform).sizeDelta = new Vector2(700, 56);
+            var t = Label(parent, text, hudFont, 28, Blood, TextAnchor.LowerLeft);
+            ((RectTransform)t.transform).sizeDelta = new Vector2(700, 64);
         }
 
         RectTransform Row(Transform parent, string label)
         {
             var row = new GameObject("row_" + label, typeof(RectTransform)).GetComponent<RectTransform>();
-            row.SetParent(parent, false); row.sizeDelta = new Vector2(700, 70);
-            var l = Label(row, label, 30, Bone, TextAnchor.MiddleLeft);
-            l.rectTransform.anchorMin = new Vector2(0, 0); l.rectTransform.anchorMax = new Vector2(0.42f, 1); l.rectTransform.offsetMin = l.rectTransform.offsetMax = Vector2.zero;
+            row.SetParent(parent, false); row.sizeDelta = new Vector2(740, 72);
+            var l = Label(row, label, bodyFont, 32, Bone, TextAnchor.MiddleLeft);
+            Anchor(l.rectTransform, new Vector2(0, 0), new Vector2(0.42f, 1));
+            var sep = Img(row, UISprites.Square, new Color(1, 1, 1, 0.06f));
+            Anchor(sep.rectTransform, new Vector2(0, 0), new Vector2(1, 0)); sep.rectTransform.sizeDelta = new Vector2(0, 2);
             return row;
         }
 
         void Cycler(Transform parent, string label, string[] options, Func<int> get, Action<int> set)
         {
             var row = Row(parent, label);
-            var img = Img(row, rounded, new Color(0.15f, 0.1f, 0.09f, 1f));
-            var r = img.rectTransform; r.anchorMin = new Vector2(0.45f, 0.1f); r.anchorMax = new Vector2(1f, 0.9f); r.offsetMin = r.offsetMax = Vector2.zero;
-            var t = Label(img.transform, "< " + options[Mathf.Clamp(get(), 0, options.Length - 1)] + " >", 30, Color.white, TextAnchor.MiddleCenter);
-            Stretch(t.rectTransform);
-            var b = img.gameObject.AddComponent<Button>();
-            b.onClick.AddListener(() =>
-            {
-                int i = (get() + 1) % options.Length; set(i);
-                t.text = "< " + options[i] + " >";
-                GameSettings.Apply();
-            });
+            var t = Label(row, "", hudFont, 32, Ember, TextAnchor.MiddleRight);
+            Anchor(t.rectTransform, new Vector2(0.45f, 0), new Vector2(1, 1));
+            t.raycastTarget = true;
+            Action refresh = () => t.text = "‹   " + options[Mathf.Clamp(get(), 0, options.Length - 1)] + "   ›";
+            refresh();
+            var b = t.gameObject.AddComponent<Button>();
+            b.targetGraphic = t;
+            b.onClick.AddListener(() => { set((get() + 1) % options.Length); refresh(); GameSettings.Apply(); if (AudioManager.Instance != null) AudioManager.Instance.PlayUI(ProceduralAudio.Click, 0.4f); });
         }
 
         void SliderRow(Transform parent, string label, float min, float max, Func<float> get, Action<float> set)
@@ -513,12 +625,12 @@ namespace TheLastNight
             var row = Row(parent, label);
             var go = new GameObject("slider", typeof(RectTransform), typeof(Slider));
             go.transform.SetParent(row, false);
-            var r = (RectTransform)go.transform; r.anchorMin = new Vector2(0.45f, 0.3f); r.anchorMax = new Vector2(1f, 0.7f); r.offsetMin = r.offsetMax = Vector2.zero;
-            var bg = Img(go.transform, rounded, new Color(1, 1, 1, 0.12f)); Stretch(bg.rectTransform);
-            var fillArea = new GameObject("fill", typeof(RectTransform)).GetComponent<RectTransform>(); fillArea.SetParent(go.transform, false); Stretch(fillArea);
-            var fill = Img(fillArea, rounded, Blood); Stretch(fill.rectTransform);
-            var handleArea = new GameObject("handleArea", typeof(RectTransform)).GetComponent<RectTransform>(); handleArea.SetParent(go.transform, false); Stretch(handleArea);
-            var handle = Img(handleArea, circle, Bone); handle.rectTransform.sizeDelta = new Vector2(44, 44);
+            var r = (RectTransform)go.transform; Anchor(r, new Vector2(0.48f, 0.3f), new Vector2(0.98f, 0.7f));
+            var bg = Img(go.transform, UISprites.Pill, new Color(1, 1, 1, 0.12f)); Anchor(bg.rectTransform, new Vector2(0, 0.4f), new Vector2(1, 0.6f));
+            var fillArea = new GameObject("fill", typeof(RectTransform)).GetComponent<RectTransform>(); fillArea.SetParent(go.transform, false); Anchor(fillArea, new Vector2(0, 0.4f), new Vector2(1, 0.6f));
+            var fill = Img(fillArea, UISprites.Pill, Blood); fill.rectTransform.Stretch();
+            var handleArea = new GameObject("handleArea", typeof(RectTransform)).GetComponent<RectTransform>(); handleArea.SetParent(go.transform, false); handleArea.Stretch();
+            var handle = Img(handleArea, UISprites.Circle, Bone); handle.rectTransform.sizeDelta = new Vector2(40, 40);
             var s = go.GetComponent<Slider>();
             s.fillRect = fill.rectTransform; s.handleRect = handle.rectTransform; s.targetGraphic = handle;
             s.minValue = min; s.maxValue = max; s.value = get();
@@ -528,52 +640,23 @@ namespace TheLastNight
         void ToggleRow(Transform parent, string label, Func<bool> get, Action<bool> set)
         {
             var row = Row(parent, label);
-            var img = Img(row, rounded, new Color(0.15f, 0.1f, 0.09f, 1f));
-            var r = img.rectTransform; r.anchorMin = new Vector2(0.45f, 0.1f); r.anchorMax = new Vector2(0.7f, 0.9f); r.offsetMin = r.offsetMax = Vector2.zero;
-            var t = Label(img.transform, get() ? "ON" : "OFF", 30, Color.white, TextAnchor.MiddleCenter);
-            Stretch(t.rectTransform);
-            var b = img.gameObject.AddComponent<Button>();
-            b.onClick.AddListener(() => { bool v = !get(); set(v); t.text = v ? "ON" : "OFF"; });
+            var track = Img(row, UISprites.Pill, new Color(1, 1, 1, 0.12f));
+            Pin(track.rectTransform, new Vector2(1, 0.5f), new Vector2(-10, 0), new Vector2(110, 50), new Vector2(1, 0.5f));
+            var knob = Img(track.transform, UISprites.Circle, Bone); knob.raycastTarget = false;
+            Action refresh = () =>
+            {
+                bool on = get();
+                track.color = on ? new Color(Blood.r, Blood.g, Blood.b, 0.9f) : new Color(1, 1, 1, 0.12f);
+                Pin(knob.rectTransform, new Vector2(on ? 1 : 0, 0.5f), new Vector2(on ? -5 : 5, 0), new Vector2(40, 40), new Vector2(on ? 1 : 0, 0.5f));
+            };
+            refresh();
+            var b = track.gameObject.AddComponent<Button>();
+            b.onClick.AddListener(() => { set(!get()); refresh(); if (AudioManager.Instance != null) AudioManager.Instance.PlayUI(ProceduralAudio.Click, 0.4f); });
         }
+    }
 
-        // ============================================================ generated sprites
-        static Sprite MakeCircleSprite(int size, float hardness)
-        {
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
-            tex.wrapMode = TextureWrapMode.Clamp;
-            float r = size * 0.5f;
-            var px = new Color32[size * size];
-            for (int y = 0; y < size; y++)
-                for (int x = 0; x < size; x++)
-                {
-                    float d = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(r, r)) / r;
-                    float a = Mathf.Clamp01((1f - d) / (1f - hardness));
-                    px[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255));
-                }
-            tex.SetPixels32(px); tex.Apply();
-            return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
-        }
-
-        static Sprite MakeRoundedSprite(int size, int radius)
-        {
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
-            tex.wrapMode = TextureWrapMode.Clamp;
-            var px = new Color32[size * size];
-            for (int y = 0; y < size; y++)
-                for (int x = 0; x < size; x++)
-                {
-                    float a = 1f;
-                    if (radius > 0)
-                    {
-                        float cx = Mathf.Clamp(x + 0.5f, radius, size - radius), cy = Mathf.Clamp(y + 0.5f, radius, size - radius);
-                        float d = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(cx, cy));
-                        a = Mathf.Clamp01(radius - d + 0.5f);
-                    }
-                    px[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255));
-                }
-            tex.SetPixels32(px); tex.Apply();
-            float b = Mathf.Max(radius, 1);
-            return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect, new Vector4(b, b, b, b));
-        }
+    static class RectExt
+    {
+        public static void Stretch(this RectTransform r) { r.anchorMin = Vector2.zero; r.anchorMax = Vector2.one; r.offsetMin = r.offsetMax = Vector2.zero; }
     }
 }
