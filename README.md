@@ -2,7 +2,8 @@
 
 First-person survival horror. The village of Andhvan, 2006: 37 people vanished in a single night.
 
-**Start here:** `SETUP.md` (setup + Android build) → `TESTING.md` (31-point test list)
+**APK without Unity on your PC:** `BUILD_IN_CLOUD.md` (GitHub builds it in the cloud and you download it from Releases)
+**Opening it in Unity on a PC:** `SETUP.md` → `TESTING.md` (31-point test list)
 **Design / story / roadmap:** `DESIGN.md`  ·  **Assets needed later:** `ASSETS.md`
 
 What is in this slice (all real, working systems; no placeholder buttons):

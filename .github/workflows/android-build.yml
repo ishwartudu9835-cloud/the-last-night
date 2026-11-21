@@ -1,34 +1,80 @@
-# Automatic Android APK build with GameCI.
-# ⚠ Runs only when you start it by hand (Actions tab > "Android APK (Unity)" > Run workflow),
-#   because it needs two things first — see SETUP.md, section "GitHub se automatic APK":
-#   1. ProjectSettings/ + Packages/ committed (open the project in Unity once and push them)
-#   2. Repo secrets: UNITY_EMAIL, UNITY_PASSWORD, UNITY_LICENSE (Unity Personal license file)
+# THE LAST NIGHT — cloud Android build (GameCI). No Unity needed on your PC.
+# Runs on every push to main and from Actions > "Android APK (Unity)" > Run workflow.
+# Needs 3 repo secrets (Settings > Secrets and variables > Actions):
+#   UNITY_EMAIL, UNITY_PASSWORD, UNITY_LICENSE   (see BUILD_IN_CLOUD.md)
+# Result: APK in the "Releases" section of the repo (downloadable on the phone).
 name: Android APK (Unity)
 on:
+  push:
+    branches: [main]
+    paths: ['Assets/**', 'Packages/**', 'ProjectSettings/**', '.github/workflows/**']
   workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: android-build
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-      - name: Check project files
+      - name: Check Unity secrets
+        id: check
+        env:
+          UL: ${{ secrets.UNITY_LICENSE }}
+          UE: ${{ secrets.UNITY_EMAIL }}
+          UP: ${{ secrets.UNITY_PASSWORD }}
         run: |
-          test -f ProjectSettings/ProjectVersion.txt || { echo "::error::ProjectSettings missing — open the project in Unity once and push ProjectSettings/ and Packages/ (SETUP.md)"; exit 1; }
+          if [ -z "$UL" ] || [ -z "$UE" ] || [ -z "$UP" ]; then
+            echo "::warning::Unity secrets missing — build skipped. Add UNITY_EMAIL, UNITY_PASSWORD, UNITY_LICENSE (see BUILD_IN_CLOUD.md)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.ok == 'true'
+      - uses: jlumbroso/free-disk-space@v1.3.1
+        if: steps.check.outputs.ok == 'true'
+        with:
+          tool-cache: false
       - uses: actions/cache@v4
+        if: steps.check.outputs.ok == 'true'
         with:
           path: Library
-          key: Library-Android-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
-          restore-keys: Library-Android-
-      - uses: jlumbroso/free-disk-space@v1.3.1
+          key: Library-Android-${{ hashFiles('Packages/**', 'ProjectSettings/**') }}-${{ hashFiles('Assets/**') }}
+          restore-keys: |
+            Library-Android-${{ hashFiles('Packages/**', 'ProjectSettings/**') }}-
+            Library-Android-
       - uses: game-ci/unity-builder@v4
+        if: steps.check.outputs.ok == 'true'
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           targetPlatform: Android
+          unityVersion: auto
+          buildMethod: TheLastNight.EditorTools.CIBuild.BuildAndroid
+          buildName: TheLastNight
           androidExportType: androidPackage
+      - name: Find APK
+        if: steps.check.outputs.ok == 'true'
+        run: |
+          ls -R build | head -50
+          APK=$(find build -name '*.apk' | head -1)
+          test -n "$APK" || { echo "::error::No APK produced"; exit 1; }
+          cp "$APK" TheLastNight.apk
       - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.ok == 'true'
         with:
           name: the-last-night-apk
-          path: build/Android
+          path: TheLastNight.apk
+      - uses: softprops/action-gh-release@v2
+        if: steps.check.outputs.ok == 'true'
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "The Last Night — build ${{ github.run_number }}"
+          body: "Phase 1 vertical slice. Phone pe ye APK download karke install karo (Unknown sources allow karna hoga)."
+          files: TheLastNight.apk
+          make_latest: true

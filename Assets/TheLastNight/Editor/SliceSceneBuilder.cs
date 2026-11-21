@@ -20,7 +20,7 @@ namespace TheLastNight.EditorTools
     {
         const string Root = "Assets/TheLastNight";
         const string GenDir = Root + "/Generated";
-        const string ScenePath = Root + "/Scenes/Andhvan_Slice.unity";
+        public const string ScenePath = Root + "/Scenes/Andhvan_Slice.unity";
 
         static Material mDirt, mLane, mPlaster, mPlasterDark, mWood, mDoor, mRoof, mStone, mMetal, mFoliage, mTrunk, mCloth, mMonster, mEye, mGhost, mBulb, mFuse, mBattery, mMedkit, mPaper, mCar, mGlass, mRain, mWater;
         static Transform level;
@@ -31,14 +31,17 @@ namespace TheLastNight.EditorTools
         static Transform dynamicRoot;
 
         [MenuItem("The Last Night/1. Build Vertical Slice Scene", priority = 1)]
-        public static void Build()
+        public static void Build() { BuildScene(true); }
+
+        /// <param name="interactive">false = batch/CI mode: no dialogs, creates URP if missing.</param>
+        public static void BuildScene(bool interactive)
         {
             if (GraphicsSettings.defaultRenderPipeline as UniversalRenderPipelineAsset == null)
             {
-                EditorUtility.DisplayDialog("The Last Night", "URP active nahi hai.\nProject 'Universal 3D' template se banao (SETUP.md step 1).", "OK");
-                return;
+                if (interactive && !EditorUtility.DisplayDialog("The Last Night", "URP active nahi hai. Main ek mobile URP asset bana ke laga doon?", "Haan, banao", "Ruko")) return;
+                CIBuild.EnsureUrp();
             }
-            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+            if (interactive && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
 
             bakeDisabled.Clear(); patrol.Clear(); villageLamps.Clear(); generatorLamps.Clear();
             EnsureFolder(Root, "Generated"); EnsureFolder(Root, "Scenes");
@@ -67,11 +70,13 @@ namespace TheLastNight.EditorTools
             EditorBuildSettings.scenes = scenes.ToArray();
             EditorUtility.ClearProgressBar();
             Debug.Log("[TLN] Vertical slice built: " + ScenePath + "  — press Play.");
-            EditorUtility.DisplayDialog("The Last Night", "Scene ban gaya!\n" + ScenePath + "\n\nPlay dabao. PC controls: WASD, mouse (click to lock), Shift, C, E, F, Tab, R, Esc.", "Chalo");
+            if (interactive) EditorUtility.DisplayDialog("The Last Night", "Scene ban gaya!\n" + ScenePath + "\n\nPlay dabao. PC controls: WASD, mouse (click to lock), Shift, C, E, F, Tab, R, Esc.", "Chalo");
         }
 
         [MenuItem("The Last Night/2. Apply Android Player Settings", priority = 2)]
-        public static void AndroidSettings()
+        public static void AndroidSettings() { ApplyAndroidSettings(true); }
+
+        public static void ApplyAndroidSettings(bool interactive)
         {
             PlayerSettings.companyName = "Cowartu";
             PlayerSettings.productName = "The Last Night";
@@ -88,7 +93,7 @@ namespace TheLastNight.EditorTools
             PlayerSettings.Android.renderOutsideSafeArea = false;
             PlayerSettings.colorSpace = ColorSpace.Linear;
             Debug.Log("[TLN] Android player settings applied (IL2CPP, ARM64, API 26+, landscape).");
-            EditorUtility.DisplayDialog("The Last Night", "Android settings set.\nAb File > Build Profiles > Android > Switch Platform, phir Build.", "OK");
+            if (interactive) EditorUtility.DisplayDialog("The Last Night", "Android settings set.\nAb File > Build Profiles > Android > Switch Platform, phir Build.", "OK");
         }
 
         // ================================================================== materials
